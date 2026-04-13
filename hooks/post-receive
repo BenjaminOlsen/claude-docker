@@ -51,16 +51,19 @@ while read -r OLD_REV NEW_REV REF; do
     git config user.name "Claude"
     git config user.email "claude@docker.local"
 
-    # Build the prompt
-    PROMPT=""
-
-    # Check for instruction files in priority order
-    if [ -f "AGENTS.md" ]; then
-        PROMPT="You are working in ${CLONE_DIR}. Read and follow the instructions in AGENTS.md. "
-        echo "==> Found AGENTS.md - Claude will follow its instructions" >&2
-    elif [ -f "CLAUDE.md" ]; then
-        PROMPT="You are working in ${CLONE_DIR}. Read and follow the instructions in CLAUDE.md. "
-        echo "==> Found CLAUDE.md - Claude will follow its instructions" >&2
+    # Read push options (git push -o prompt="..." -o key=value)
+    PUSH_PROMPT=""
+    if [ -n "${GIT_PUSH_OPTION_COUNT:-}" ]; then
+        for i in $(seq 0 $((GIT_PUSH_OPTION_COUNT - 1))); do
+            OPT_VAR="GIT_PUSH_OPTION_$i"
+            OPT="${!OPT_VAR}"
+            case "$OPT" in
+                prompt=*)
+                    PUSH_PROMPT="${OPT#prompt=}"
+                    echo "==> Push option prompt: ${PUSH_PROMPT}" >&2
+                    ;;
+            esac
+        done
     fi
 
     # Check for a repo-specific hook override
@@ -70,11 +73,24 @@ while read -r OLD_REV NEW_REV REF; do
         continue
     fi
 
-    # Default prompt if no instruction file found
-    if [ -z "$PROMPT" ]; then
-        PROMPT="You are working in ${CLONE_DIR}. Analyze the codebase thoroughly. "
-        PROMPT+="Look for TODOs, bugs, and improvements. "
+    # Build the prompt
+    PROMPT="You are working in ${CLONE_DIR}. "
+
+    # Check for instruction files in priority order
+    if [ -f "AGENTS.md" ]; then
+        PROMPT+="Read and follow the instructions in AGENTS.md. "
+        echo "==> Found AGENTS.md - Claude will follow its instructions" >&2
+    elif [ -f "CLAUDE.md" ]; then
+        PROMPT+="Read and follow the instructions in CLAUDE.md. "
+        echo "==> Found CLAUDE.md - Claude will follow its instructions" >&2
+    else
+        PROMPT+="Analyze the codebase thoroughly. Look for TODOs, bugs, and improvements. "
         echo "==> No AGENTS.md or CLAUDE.md found - Claude will analyze the code" >&2
+    fi
+
+    # Append the push option prompt (overrides or augments the instruction file)
+    if [ -n "$PUSH_PROMPT" ]; then
+        PROMPT+="IMPORTANT additional instructions from the user: ${PUSH_PROMPT} "
     fi
 
     # Append common instructions

@@ -57,6 +57,9 @@ Repos are auto-created in the container on first push.
 
 ```bash
 git push claude main
+
+# Or with an initial prompt to tell Claude what to focus on
+git push -o prompt="Fix the failing tests in src/auth" claude main
 ```
 
 You'll see output like:
@@ -98,6 +101,17 @@ Claude looks for instruction files in your repo (in order of priority):
 
 If none of these exist, Claude will analyze the codebase on its own and look for TODOs, bugs, and improvements.
 
+### Push-time prompt
+
+You can pass an initial prompt via git push options. This gets appended to whatever `AGENTS.md`/`CLAUDE.md` already provides, so you can give Claude specific focus for a particular push:
+
+```bash
+# Just a prompt, no instruction files needed
+git push -o prompt="Refactor the database layer to use connection pooling" claude main
+
+# Combines with AGENTS.md -- Claude reads the file AND your prompt
+git push -o prompt="Focus on the auth module only" claude main
+```
 
 ## Launcher script
 

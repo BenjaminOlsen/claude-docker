@@ -35,6 +35,7 @@ if [ -n "$REPO_PATH" ]; then
     if [ ! -d "$FULL_PATH" ]; then
         echo "Initializing new repository: ${REPO_PATH}" >&2
         git init --bare "$FULL_PATH" >/dev/null 2>&1
+        git -C "$FULL_PATH" config receive.advertisePushOptions true
         chown -R git:git "$FULL_PATH"
 
         # Copy default hooks
