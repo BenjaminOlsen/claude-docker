@@ -15,44 +15,51 @@ if [ -z "$CMD" ]; then
     exit 1
 fi
 
-# Extract the repo path from git commands like:
+# Extract the git command and repo path from commands like:
 #   git-receive-pack '/repos/myproject.git'
 #   git-upload-pack '/repos/myproject.git'
-REPO_PATH=""
-if [[ "$CMD" =~ ^git-(receive|upload)-pack\ \'?/?(.+?)\'?$ ]]; then
-    REPO_PATH="${BASH_REMATCH[2]}"
-fi
+GIT_CMD="${CMD%% *}"
+REPO_ARG="${CMD#* }"
 
-# Normalize: strip leading slashes, ensure .git suffix
-if [ -n "$REPO_PATH" ]; then
-    REPO_PATH="${REPO_PATH#/}"
-    REPO_PATH="${REPO_PATH#repos/}"
-    [[ "$REPO_PATH" != *.git ]] && REPO_PATH="${REPO_PATH}.git"
+# Strip surrounding quotes
+REPO_ARG="${REPO_ARG#\'}"
+REPO_ARG="${REPO_ARG%\'}"
+REPO_ARG="${REPO_ARG#\"}"
+REPO_ARG="${REPO_ARG%\"}"
 
-    FULL_PATH="${REPOS_DIR}/${REPO_PATH}"
+case "$GIT_CMD" in
+    git-receive-pack|git-upload-pack)
+        # Normalize: strip leading slashes, ensure .git suffix
+        REPO_PATH="${REPO_ARG#/}"
+        REPO_PATH="${REPO_PATH#repos/}"
+        [[ "$REPO_PATH" != *.git ]] && REPO_PATH="${REPO_PATH}.git"
 
-    # Auto-init bare repo if it doesn't exist
-    if [ ! -d "$FULL_PATH" ]; then
-        echo "Initializing new repository: ${REPO_PATH}" >&2
-        git init --bare "$FULL_PATH" >/dev/null 2>&1
-        git -C "$FULL_PATH" config receive.advertisePushOptions true
-        chown -R git:git "$FULL_PATH"
+        FULL_PATH="${REPOS_DIR}/${REPO_PATH}"
 
-        # Copy default hooks
-        if [ -d "$HOOKS_DIR" ]; then
-            for hook in "$HOOKS_DIR"/*; do
-                [ -f "$hook" ] || continue
-                cp "$hook" "$FULL_PATH/hooks/"
-                chmod +x "$FULL_PATH/hooks/$(basename "$hook")"
-            done
+        # Auto-init bare repo if it doesn't exist
+        if [ ! -d "$FULL_PATH" ]; then
+            echo "Initializing new repository: ${REPO_PATH}" >&2
+            git init --bare "$FULL_PATH" >/dev/null 2>&1
+            git -C "$FULL_PATH" config receive.advertisePushOptions true
+            chown -R git:git "$FULL_PATH"
+
+            # Copy default hooks
+            if [ -d "$HOOKS_DIR" ]; then
+                for hook in "$HOOKS_DIR"/*; do
+                    [ -f "$hook" ] || continue
+                    cp "$hook" "$FULL_PATH/hooks/"
+                    chmod +x "$FULL_PATH/hooks/$(basename "$hook")"
+                done
+            fi
+
+            echo "Repository ready." >&2
         fi
 
-        echo "Repository ready." >&2
-    fi
-
-    # Rewrite the command to use the canonical path
-    CMD="${CMD%% *} '${FULL_PATH}'"
-fi
-
-# Delegate to git-shell
-exec /usr/bin/git-shell -c "$CMD"
+        # Delegate to git-shell with the canonical path
+        exec /usr/bin/git-shell -c "$GIT_CMD '${FULL_PATH}'"
+        ;;
+    *)
+        # Unknown command -- let git-shell decide
+        exec /usr/bin/git-shell -c "$CMD"
+        ;;
+esac
