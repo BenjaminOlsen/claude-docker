@@ -22,6 +22,7 @@ RUN npm install -g @anthropic-ai/claude-code
 
 # Create git user with git-shell
 RUN useradd -m -s /usr/bin/git-shell git \
+    && passwd -u git \
     && mkdir -p /home/git/.ssh \
     && mkdir -p /home/git/repos \
     && mkdir -p /home/git/hooks \
