@@ -20,8 +20,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # Install Claude CLI
 RUN npm install -g @anthropic-ai/claude-code
 
-# Create git user with git-shell
-RUN useradd -m -s /usr/bin/git-shell git \
+# Create git user (forced command in authorized_keys restricts access)
+RUN useradd -m -s /bin/bash git \
     && passwd -d git \
     && mkdir -p /home/git/.ssh \
     && mkdir -p /home/git/repos \
