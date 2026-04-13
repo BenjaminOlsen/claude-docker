@@ -9,7 +9,6 @@ HOST_KEYS_DIR="/etc/ssh/ssh_host_keys"
 if [ -n "${HOST_UID:-}" ] && [ -n "${HOST_GID:-}" ]; then
     groupmod -o -g "$HOST_GID" git 2>/dev/null || true
     usermod -o -u "$HOST_UID" -g "$HOST_GID" git 2>/dev/null || true
-    chown -R git:git /home/git
 fi
 
 # Generate SSH host keys if they don't exist
@@ -24,17 +23,22 @@ AUTH_KEYS="/home/git/.ssh/authorized_keys"
 if [ ! -f "$AUTH_KEYS" ]; then
     echo "WARNING: No authorized_keys found at $AUTH_KEYS" >&2
     echo "Mount your public key: -v ~/.ssh/id_ed25519.pub:/home/git/.ssh/authorized_keys:ro" >&2
-    # Create an empty file so sshd doesn't complain
     touch "$AUTH_KEYS"
 fi
 
+# Fix ownership on writable dirs only (skip read-only mounts)
 chmod 700 /home/git/.ssh
+chown git:git /home/git/.ssh
 chmod 600 "$AUTH_KEYS" 2>/dev/null || true
-chown -R git:git /home/git/.ssh
+chown git:git "$AUTH_KEYS" 2>/dev/null || true
 
-# Ensure Claude credentials directory exists and is owned by git
+# Ensure Claude credentials directory exists, own what we can
 mkdir -p /home/git/.claude
-chown -R git:git /home/git/.claude
+chown git:git /home/git/.claude
+chown git:git /home/git/.claude/.credentials.json 2>/dev/null || true
+chown git:git /home/git/.claude/settings.json 2>/dev/null || true
+
+chown git:git /home/git
 
 # Verify Claude credentials
 if [ -f "/home/git/.claude/.credentials.json" ]; then
