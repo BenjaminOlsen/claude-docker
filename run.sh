@@ -67,12 +67,12 @@ case "${ACTION:-start}" in
     --attach)
         if [ -z "${ATTACH_SESSION:-}" ]; then
             echo "Available tmux sessions in [${INSTANCE}]:"
-            docker exec -it "$CONTAINER_NAME" tmux list-sessions 2>/dev/null || echo "  (none)"
+            docker exec -it -u git "$CONTAINER_NAME" tmux list-sessions 2>/dev/null || echo "  (none)"
             echo ""
             echo "Usage: $0 -n ${INSTANCE} --attach <session-name>"
             exit 1
         fi
-        docker exec -it "$CONTAINER_NAME" tmux attach -t "$ATTACH_SESSION"
+        docker exec -it -u git "$CONTAINER_NAME" tmux attach -t "$ATTACH_SESSION"
         ;;
     --shell)
         docker exec -it "$CONTAINER_NAME" bash
@@ -84,7 +84,7 @@ case "${ACTION:-start}" in
         docker ps --filter "name=$CONTAINER_NAME" --format "  {{.Status}} (port ${PORT})" 2>/dev/null || echo "  not running"
         echo ""
         echo "Tmux sessions (Claude workers):"
-        docker exec "$CONTAINER_NAME" tmux list-sessions 2>/dev/null || echo "  (none)"
+        docker exec -u git "$CONTAINER_NAME" tmux list-sessions 2>/dev/null || echo "  (none)"
         echo ""
         echo "Repos:"
         docker exec "$CONTAINER_NAME" ls /home/git/repos/ 2>/dev/null || echo "  (none)"
