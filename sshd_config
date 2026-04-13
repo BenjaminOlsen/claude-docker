@@ -1,0 +1,37 @@
+# Claude Docker SSH Config
+Port 22
+AddressFamily any
+ListenAddress 0.0.0.0
+
+# Host keys (persistent via volume mount)
+HostKey /etc/ssh/ssh_host_keys/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_keys/ssh_host_rsa_key
+
+# Authentication
+PubkeyAuthentication yes
+PasswordAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+UsePAM no
+
+# Dynamic authorized keys lookup
+AuthorizedKeysFile none
+AuthorizedKeysCommand /usr/local/bin/authorized-keys-command.sh %u
+AuthorizedKeysCommandUser root
+
+# Restrict to git and root users
+AllowUsers git root
+
+# Disable all forwarding for git user
+Match User git
+    AllowTcpForwarding no
+    AllowAgentForwarding no
+    X11Forwarding no
+    PermitTTY no
+
+# Allow root full access (for debugging)
+Match User root
+    PermitTTY yes
+
+# Logging
+LogLevel INFO

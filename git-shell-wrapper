@@ -1,0 +1,57 @@
+#!/bin/bash
+# Intercepts SSH commands for the git user.
+# Auto-initializes bare repos on first access, then delegates to git-shell.
+
+set -euo pipefail
+
+REPOS_DIR="/home/git/repos"
+HOOKS_DIR="/home/git/hooks"
+
+# SSH_ORIGINAL_COMMAND is set by sshd with the command the client sent
+CMD="${SSH_ORIGINAL_COMMAND:-}"
+
+if [ -z "$CMD" ]; then
+    echo "Interactive login disabled. Use git push/pull." >&2
+    exit 1
+fi
+
+# Extract the repo path from git commands like:
+#   git-receive-pack '/repos/myproject.git'
+#   git-upload-pack '/repos/myproject.git'
+REPO_PATH=""
+if [[ "$CMD" =~ ^git-(receive|upload)-pack\ \'?/?(.+?)\'?$ ]]; then
+    REPO_PATH="${BASH_REMATCH[2]}"
+fi
+
+# Normalize: strip leading slashes, ensure .git suffix
+if [ -n "$REPO_PATH" ]; then
+    REPO_PATH="${REPO_PATH#/}"
+    REPO_PATH="${REPO_PATH#repos/}"
+    [[ "$REPO_PATH" != *.git ]] && REPO_PATH="${REPO_PATH}.git"
+
+    FULL_PATH="${REPOS_DIR}/${REPO_PATH}"
+
+    # Auto-init bare repo if it doesn't exist
+    if [ ! -d "$FULL_PATH" ]; then
+        echo "Initializing new repository: ${REPO_PATH}" >&2
+        git init --bare "$FULL_PATH" >/dev/null 2>&1
+        chown -R git:git "$FULL_PATH"
+
+        # Copy default hooks
+        if [ -d "$HOOKS_DIR" ]; then
+            for hook in "$HOOKS_DIR"/*; do
+                [ -f "$hook" ] || continue
+                cp "$hook" "$FULL_PATH/hooks/"
+                chmod +x "$FULL_PATH/hooks/$(basename "$hook")"
+            done
+        fi
+
+        echo "Repository ready." >&2
+    fi
+
+    # Rewrite the command to use the canonical path
+    CMD="${CMD%% *} '${FULL_PATH}'"
+fi
+
+# Delegate to git-shell
+exec /usr/bin/git-shell -c "$CMD"

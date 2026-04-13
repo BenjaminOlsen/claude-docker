@@ -1,0 +1,101 @@
+#!/bin/bash
+# Post-receive hook: triggers Claude to work on pushed code autonomously.
+#
+# For each pushed branch:
+#   1. Clones the bare repo into a timestamped work directory
+#   2. Looks for AGENTS.md (or CLAUDE.md) for instructions
+#   3. Launches Claude headlessly to work on the code
+#
+# Claude runs inside a tmux session so you can attach and watch:
+#   docker exec -it claude-docker tmux attach -t <session-name>
+
+set -euo pipefail
+
+REPOS_DIR="/home/git/repos"
+WORK_DIR="/home/git/work"
+LOG_DIR="/home/git/logs"
+mkdir -p "$LOG_DIR"
+
+# Determine repo name from the bare repo path
+BARE_REPO="$(pwd)"
+REPO_NAME="$(basename "$BARE_REPO" .git)"
+
+while read -r OLD_REV NEW_REV REF; do
+    # Skip deleted branches
+    if [[ "$NEW_REV" =~ ^0+$ ]]; then
+        continue
+    fi
+
+    # Only process branch pushes
+    case "$REF" in
+        refs/heads/*) ;;
+        *) continue ;;
+    esac
+
+    BRANCH="${REF#refs/heads/}"
+    TIMESTAMP="$(date +%Y-%m-%d/%H_%M_%S)"
+    CLONE_DIR="${WORK_DIR}/${REPO_NAME}/${BRANCH}/${TIMESTAMP}"
+    LOGFILE="${LOG_DIR}/${REPO_NAME}_${BRANCH}_$(date +%Y%m%d_%H%M%S).log"
+
+    echo "==> Claude Docker: received push to ${REPO_NAME}/${BRANCH}" >&2
+    echo "==> Work directory: ${CLONE_DIR}" >&2
+    echo "==> Log file: ${LOGFILE}" >&2
+
+    # Clone into work directory
+    mkdir -p "$CLONE_DIR"
+    git clone "$BARE_REPO" "$CLONE_DIR" 2>/dev/null
+    cd "$CLONE_DIR"
+    git checkout "$BRANCH" 2>/dev/null
+
+    # Configure git identity for Claude's commits
+    git config user.name "Claude"
+    git config user.email "claude@docker.local"
+
+    # Build the prompt
+    PROMPT=""
+
+    # Check for instruction files in priority order
+    if [ -f "AGENTS.md" ]; then
+        PROMPT="You are working in ${CLONE_DIR}. Read and follow the instructions in AGENTS.md. "
+        echo "==> Found AGENTS.md - Claude will follow its instructions" >&2
+    elif [ -f "CLAUDE.md" ]; then
+        PROMPT="You are working in ${CLONE_DIR}. Read and follow the instructions in CLAUDE.md. "
+        echo "==> Found CLAUDE.md - Claude will follow its instructions" >&2
+    fi
+
+    # Check for a repo-specific hook override
+    if [ -f ".claude-docker-hook" ] && [ -x ".claude-docker-hook" ]; then
+        echo "==> Found .claude-docker-hook - running custom hook instead" >&2
+        ./.claude-docker-hook "$OLD_REV" "$NEW_REV" "$BRANCH" 2>&1 | tee "$LOGFILE"
+        continue
+    fi
+
+    # Default prompt if no instruction file found
+    if [ -z "$PROMPT" ]; then
+        PROMPT="You are working in ${CLONE_DIR}. Analyze the codebase thoroughly. "
+        PROMPT+="Look for TODOs, bugs, and improvements. "
+        echo "==> No AGENTS.md or CLAUDE.md found - Claude will analyze the code" >&2
+    fi
+
+    # Append common instructions
+    PROMPT+="When you are done, commit your changes with clear commit messages. "
+    PROMPT+="Push your commits to origin/${BRANCH} when finished. "
+    PROMPT+="Work autonomously - do not ask questions, make your best judgment."
+
+    # Session name for tmux (sanitized)
+    SESSION_NAME="claude-${REPO_NAME}-${BRANCH}"
+    SESSION_NAME="${SESSION_NAME//[^a-zA-Z0-9_-]/_}"
+
+    # Kill any existing session with the same name
+    tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
+
+    echo "==> Starting Claude in tmux session: ${SESSION_NAME}" >&2
+    echo "==> Attach with: docker exec -it claude-docker tmux attach -t ${SESSION_NAME}" >&2
+
+    # Launch Claude in a tmux session
+    tmux new-session -d -s "$SESSION_NAME" -c "$CLONE_DIR" \
+        "claude -p '${PROMPT}' --dangerously-skip-permissions 2>&1 | tee '${LOGFILE}'; echo '=== Claude finished at $(date) ===' >> '${LOGFILE}'"
+
+    echo "==> Claude is working autonomously on ${REPO_NAME}/${BRANCH}" >&2
+    echo "==> Watch logs: docker exec -it claude-docker tail -f ${LOGFILE}" >&2
+done
