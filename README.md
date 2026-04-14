@@ -48,7 +48,7 @@ HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build -d
 
 ```bash
 cd /path/to/your/project
-git remote add claude ssh://git@localhost:2222/repos/myproject
+git remote add claude ssh://git@localhost:2222/repos/<your-repo>
 ```
 
 Repos are auto-created in the container on first push.
@@ -122,15 +122,16 @@ Every instance has a **name** (set with `-n <name>`, defaults to `default`). The
 ./run.sh --build                    # Rebuild and start
 ./run.sh --stop                     # Stop the container
 ./run.sh --status                   # Show active repos and Claude sessions
-./run.sh --attach claude-myproject-main   # Attach to a Claude tmux session
+./run.sh --attach <session-name>    # Attach to a Claude tmux session
 ./run.sh --logs                     # Follow container logs
 ./run.sh --shell                    # Root shell in the container
+./run.sh --destroy                  # Stop and delete all data (repos, work, logs)
 ./run.sh --list                     # List all running instances
 
 # Named instances
-./run.sh -n myworker -p 2223 --build    # Instance named "myworker" on port 2223
-./run.sh -n myworker --status            # Status for "myworker"
-./run.sh -n myworker --stop              # Stop "myworker"
+./run.sh -n <name> -p <port> --build    # Instance named <name> on port <port>
+./run.sh -n <name> --status             # Status for <name>
+./run.sh -n <name> --stop               # Stop <name>
 ```
 
 ## Multiple instances
@@ -138,26 +139,26 @@ Every instance has a **name** (set with `-n <name>`, defaults to `default`). The
 You can run multiple containers in parallel, each on its own port with isolated volumes:
 
 ```bash
-# Start three independent workers (each -n name becomes the container suffix)
-./run.sh -n alpha -p 2222 --build           # container: claude-alpha, port 2222
-./run.sh -n bravo -p 2223 --build           # container: claude-bravo, port 2223
-./run.sh -n charlie -p 2224 --build         # container: claude-charlie, port 2224
+# Start three independent workers (-n <name> becomes the container suffix)
+./run.sh -n worker1 -p 2222 --build         # container: claude-worker1, port 2222
+./run.sh -n worker2 -p 2223 --build         # container: claude-worker2, port 2223
+./run.sh -n worker3 -p 2224 --build         # container: claude-worker3, port 2224
 
 # Each gets its own git remote
-git remote add alpha    ssh://git@localhost:2222/repos/myproject
-git remote add bravo    ssh://git@localhost:2223/repos/myproject
-git remote add charlie  ssh://git@localhost:2224/repos/myproject
+git remote add worker1  ssh://git@localhost:2222/repos/<your-repo>
+git remote add worker2  ssh://git@localhost:2223/repos/<your-repo>
+git remote add worker3  ssh://git@localhost:2224/repos/<your-repo>
 
 # Push the same repo to multiple workers with different AGENTS.md on different branches,
 # or push entirely different repos to each
-git push alpha   main
-git push bravo   main
-git push charlie experiment-branch
+git push worker1 main
+git push worker2 main
+git push worker3 experiment-branch
 
 # Manage them independently
-./run.sh -n bravo --status
-./run.sh -n bravo --attach claude-myproject-main
-./run.sh -n charlie --stop
+./run.sh -n worker2 --status
+./run.sh -n worker2 --attach <session-name>
+./run.sh -n worker3 --stop
 
 # List all running instances
 ./run.sh --list
@@ -196,7 +197,7 @@ The default port is 2222. Use the `-p` flag to change it:
 ./run.sh -p 3333 --build
 ```
 
-Then use `ssh://git@localhost:3333/repos/myproject` as your remote.
+Then use `ssh://git@localhost:3333/repos/<your-repo>` as your remote.
 
 ### Outbound firewall
 
@@ -280,9 +281,8 @@ docker exec claude-default ls /home/git/logs/
 ### Want to wipe everything and start fresh
 
 ```bash
-./run.sh --stop
-docker compose -p claude-default down -v   # removes volumes too (use your -n name)
-./run.sh --build
+./run.sh --destroy              # stops container and deletes all volumes (repos, work, logs)
+./run.sh --build                # start fresh
 ```
 
 # How it all works

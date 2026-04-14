@@ -6,6 +6,7 @@
 #   ./run.sh --build                # Rebuild and start
 #   ./run.sh -n worker2 -p 2223     # Start a named instance on a different port
 #   ./run.sh -n worker2 --stop      # Stop a specific instance
+#   ./run.sh -n worker2 --destroy   # Stop and delete all data (repos, work, logs)
 #   ./run.sh --attach <session>     # Attach to a Claude tmux session
 #   ./run.sh --shell                # Get a root shell in the container
 
@@ -26,7 +27,7 @@ while [[ $# -gt 0 ]]; do
             PORT="$2"
             shift 2
             ;;
-        --build|--stop|--logs|--status|--shell)
+        --build|--stop|--destroy|--logs|--status|--shell)
             ACTION="$1"
             shift
             ;;
@@ -53,13 +54,23 @@ case "${ACTION:-start}" in
         echo "Building and starting Claude Docker [${INSTANCE}] on port ${PORT}..."
         HOST_UID="$(id -u)" HOST_GID="$(id -g)" $COMPOSE up --build -d
         echo ""
-        echo "Ready! Add as a git remote:"
-        echo "  git remote add ${INSTANCE} ssh://git@localhost:${PORT}/repos/myproject"
-        echo "  git push ${INSTANCE} main"
+        echo "Ready! Add as a git remote in your project:"
+        echo "  git remote add ${INSTANCE} ssh://git@localhost:${PORT}/repos/<your-repo>"
+        echo "  git push ${INSTANCE} <branch>"
         ;;
     --stop)
         echo "Stopping Claude Docker [${INSTANCE}]..."
         $COMPOSE down
+        ;;
+    --destroy)
+        echo "Destroying Claude Docker [${INSTANCE}] and all its data (repos, work, logs)..."
+        read -rp "Are you sure? [y/N] " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            $COMPOSE down -v
+            echo "Destroyed. Run '$0 -n ${INSTANCE} --build' to start fresh."
+        else
+            echo "Cancelled."
+        fi
         ;;
     --logs)
         $COMPOSE logs -f
@@ -97,16 +108,17 @@ case "${ACTION:-start}" in
         echo "Starting Claude Docker [${INSTANCE}] on port ${PORT}..."
         HOST_UID="$(id -u)" HOST_GID="$(id -g)" $COMPOSE up -d
         echo ""
-        echo "Ready! Add as a git remote:"
-        echo "  git remote add ${INSTANCE} ssh://git@localhost:${PORT}/repos/myproject"
-        echo "  git push ${INSTANCE} main"
+        echo "Ready! Add as a git remote in your project:"
+        echo "  git remote add ${INSTANCE} ssh://git@localhost:${PORT}/repos/<your-repo>"
+        echo "  git push ${INSTANCE} <branch>"
         echo ""
         echo "Other commands:"
         echo "  $0 -n ${INSTANCE} --status    Show status and active Claude sessions"
         echo "  $0 -n ${INSTANCE} --attach    Attach to a Claude tmux session"
         echo "  $0 -n ${INSTANCE} --logs      Follow container logs"
         echo "  $0 -n ${INSTANCE} --shell     Root shell in the container"
-        echo "  $0 -n ${INSTANCE} --stop      Stop the container"
+        echo "  $0 -n ${INSTANCE} --stop       Stop the container"
+        echo "  $0 -n ${INSTANCE} --destroy    Stop and wipe all data"
         echo "  $0 --list                      List all running instances"
         ;;
 esac
