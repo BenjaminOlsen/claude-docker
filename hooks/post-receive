@@ -125,7 +125,7 @@ while read -r OLD_REV NEW_REV REF; do
     tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
 
     echo "==> Starting Claude in tmux session: ${SESSION_NAME}" >&2
-    echo "==> Attach with: docker exec -it claude-docker tmux attach -t ${SESSION_NAME}" >&2
+    echo "==> Attach with: docker exec -it ${CLAUDE_CONTAINER_NAME:-claude-docker} tmux attach -t ${SESSION_NAME}" >&2
 
     # Write prompt to a file and use a launcher script to avoid quoting issues
     # across tmux -> script -> claude. 'script -f' allocates a PTY so output

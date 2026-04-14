@@ -246,7 +246,7 @@ Note: domains are resolved to IPs at container startup. If Anthropic's IPs rotat
 Container filesystem:
 /home/git/
 ├── .ssh/authorized_keys     # mounted from host (read-only)
-├── .claude/                 # mounted from host (Claude credentials)
+├── .claude/                 # Claude config dir (credentials via env vars)
 ├── repos/                   # bare git repos (auto-created on push)
 │   └── myproject.git/
 │       └── hooks/post-receive
