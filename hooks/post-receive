@@ -140,9 +140,12 @@ exec claude -p "$(cat .claude-prompt)" --dangerously-skip-permissions
 LAUNCHER_EOF
     chmod +x "$LAUNCHER"
 
-    tmux new-session -d -s "$SESSION_NAME" -c "$CLONE_DIR" \
+    # Exclude working files from git so Claude doesn't accidentally commit them
+    printf '.claude-prompt\n.claude-launcher.sh\n' >> "${CLONE_DIR}/.git/info/exclude"
+
+    tmux new-session -d -s "$SESSION_NAME" -c "$CLONE_DIR" -x 220 -y 50 \
         "script -q -f -c '${LAUNCHER}' '${LOGFILE}'; echo '=== Claude finished at \$(date) ===' >> '${LOGFILE}'"
 
     echo "==> Claude is working autonomously on ${REPO_NAME}/${BRANCH}" >&2
-    echo "==> Watch logs: docker exec -it claude-docker tail -f ${LOGFILE}" >&2
+    echo "==> Watch logs: docker exec -it ${CLAUDE_CONTAINER_NAME:-claude-docker} tail -f ${LOGFILE}" >&2
 done
