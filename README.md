@@ -351,11 +351,12 @@ The hook:
 2. **Checks out** the pushed branch
 3. **Looks for instructions** -- `AGENTS.md`, then `CLAUDE.md`, then `.claude-docker-hook`
 4. **Builds a prompt** from what it finds
-5. **Launches Claude** inside a detached tmux session:
+5. **Launches Claude** inside a detached tmux session. The prompt is written to a file and a launcher script runs it via `script -f` (which allocates a PTY for live-streaming output):
 
 ```bash
 tmux new-session -d -s "claude-myproject-main" \
-    "claude -p '<prompt>' --dangerously-skip-permissions 2>&1 | tee logfile"
+    "script -q -f -c '.claude-launcher.sh' logfile"
+# .claude-launcher.sh: exec claude -p "$(cat .claude-prompt)" --dangerously-skip-permissions
 ```
 
 At this point your `git push` returns -- the hook launched tmux in the background and didn't wait for Claude to finish.
@@ -406,7 +407,10 @@ SSH to localhost:2222 ──────────▶  sshd
                                    (clones repo → work dir, reads AGENTS.md)
                                       │
                                       ▼
-                                   tmux session ──▶ claude -p "..." --dangerously-skip-permissions
+                                   tmux session ──▶ script -f -c .claude-launcher.sh logfile
+                                                        │
+                                                        ▼
+                                                   claude -p "..." --dangerously-skip-permissions
                                                         │
                                                         ▼
                                                    (edits, tests, commits)
