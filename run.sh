@@ -127,7 +127,7 @@ case "${ACTION:-start}" in
         echo "Running Claude Docker instances:"
         docker ps --filter "name=claude-" --format "  {{.Names}}\t{{.Status}}\t{{.Ports}}"
         ;;
-    start|"")
+    start|""|--start)
         echo "Starting Claude Docker [${INSTANCE}] on port ${PORT}..."
         HOST_UID="$(id -u)" HOST_GID="$(id -g)" $COMPOSE up -d
         echo ""
@@ -143,5 +143,10 @@ case "${ACTION:-start}" in
         echo "  $0 -n ${INSTANCE} --stop       Stop the container"
         echo "  $0 -n ${INSTANCE} --destroy    Stop and wipe all data"
         echo "  $0 --list                      List all running instances"
+        ;;
+    *)
+        echo "Error: Unknown command '${ACTION}'" >&2
+        echo "Usage: $0 [--build|--stop|--destroy|--status|--attach|--logs|--shell|--list]" >&2
+        exit 1
         ;;
 esac
