@@ -11,12 +11,21 @@
 
 set -euo pipefail
 
+# Only run for pushes over SSH (from the user). Skip local pushes (from Claude
+# pushing back to the bare repo) to prevent an infinite loop.
+if [ -z "${SSH_CONNECTION:-}" ]; then
+    exit 0
+fi
+
 # Clear git environment variables inherited from git-receive-pack.
 # These interfere with git clone/checkout operations inside the hook.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 
 # Ensure PATH includes npm global bin (where claude is installed)
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
+
+# Load Claude auth credentials (written by entrypoint.sh)
+[ -f /home/git/.claude-env ] && source /home/git/.claude-env
 
 REPOS_DIR="/home/git/repos"
 WORK_DIR="/home/git/work"
@@ -116,9 +125,21 @@ while read -r OLD_REV NEW_REV REF; do
     echo "==> Starting Claude in tmux session: ${SESSION_NAME}" >&2
     echo "==> Attach with: docker exec -it claude-docker tmux attach -t ${SESSION_NAME}" >&2
 
-    # Launch Claude in a tmux session
+    # Write prompt to a file and use a launcher script to avoid quoting issues
+    # across tmux -> script -> claude. 'script -f' allocates a PTY so output
+    # streams live to both the terminal (for --attach) and the log file.
+    PROMPT_FILE="${CLONE_DIR}/.claude-prompt"
+    printf '%s' "$PROMPT" > "$PROMPT_FILE"
+
+    LAUNCHER="${CLONE_DIR}/.claude-launcher.sh"
+    cat > "$LAUNCHER" <<'LAUNCHER_EOF'
+#!/bin/bash
+exec claude -p "$(cat .claude-prompt)" --dangerously-skip-permissions
+LAUNCHER_EOF
+    chmod +x "$LAUNCHER"
+
     tmux new-session -d -s "$SESSION_NAME" -c "$CLONE_DIR" \
-        "claude -p '${PROMPT}' --dangerously-skip-permissions 2>&1 | tee '${LOGFILE}'; echo '=== Claude finished at $(date) ===' >> '${LOGFILE}'"
+        "script -q -f -c '${LAUNCHER}' '${LOGFILE}'; echo '=== Claude finished at \$(date) ===' >> '${LOGFILE}'"
 
     echo "==> Claude is working autonomously on ${REPO_NAME}/${BRANCH}" >&2
     echo "==> Watch logs: docker exec -it claude-docker tail -f ${LOGFILE}" >&2

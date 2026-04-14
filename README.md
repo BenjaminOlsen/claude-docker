@@ -38,10 +38,16 @@ Inspired by [aquanauts/legit](https://github.com/aquanauts/legit).
 ./run.sh --build
 ```
 
+The launcher auto-detects your SSH public key (`~/.ssh/id_ed25519.pub`, then `~/.ssh/id_rsa.pub`). To use a specific key:
+
+```bash
+./run.sh -k ~/.ssh/my_key.pub --build
+```
+
 Or with docker compose directly:
 
 ```bash
-HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build -d
+SSH_PUBKEY=~/.ssh/id_ed25519.pub HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build -d
 ```
 
 ### 2. Add the remote to your project
@@ -170,20 +176,31 @@ Each instance gets its own container (`claude-<name>`), port, and volumes (repos
 
 ### SSH key
 
-By default, `docker-compose.yml` mounts `~/.ssh/id_ed25519.pub`. If you use a different key:
+The launcher auto-detects your SSH public key (tries `~/.ssh/id_ed25519.pub`, then `~/.ssh/id_rsa.pub`). To use a specific key:
 
-```yaml
-volumes:
-  - ~/.ssh/id_rsa.pub:/home/git/.ssh/authorized_keys:ro
+```bash
+./run.sh -k ~/.ssh/my_key.pub --build
+```
+
+Or set `SSH_PUBKEY` when using docker compose directly:
+
+```bash
+SSH_PUBKEY=~/.ssh/id_rsa.pub HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build -d
 ```
 
 ### Claude authentication
 
-**Pro/Max plan (OAuth):** The compose file mounts your `~/.claude/.credentials.json` into the container. The CLI uses the refresh token to stay authenticated headlessly -- no browser needed after your initial `claude login` on the host.
+**Pro/Max plan (OAuth):** Generate a long-lived token, then add it to your `.env` file:
 
-The credentials file is mounted read-write so the CLI can refresh expired tokens.
+```bash
+claude setup-token          # follow the prompts, copy the token
+```
 
-**API key (pay-as-you-go):** Alternatively, create a `.env` file next to `docker-compose.yml`:
+```env
+CLAUDE_CODE_OAUTH_TOKEN=<your-token>
+```
+
+**API key (pay-as-you-go):** Create a `.env` file next to `docker-compose.yml`:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
