@@ -103,7 +103,7 @@ while read -r OLD_REV NEW_REV REF; do
         PROMPT+="Read and follow the instructions in CLAUDE.md. "
         echo "==> Found CLAUDE.md - Claude will follow its instructions" >&2
     else
-        PROMPT+="Analyze the codebase thoroughly. Look for TODOs, bugs, and improvements. "
+        PROMPT+="Analyze the codebase thoroughly. Look for TODOs, bugs, and improvements. Keep going until there is nothing left to do. "
         echo "==> No AGENTS.md or CLAUDE.md found - Claude will analyze the code" >&2
     fi
 
@@ -113,8 +113,8 @@ while read -r OLD_REV NEW_REV REF; do
     fi
 
     # Append common instructions
-    PROMPT+="When you are done, commit your changes with clear commit messages. "
-    PROMPT+="Push your commits to origin/${BRANCH} when finished. "
+    PROMPT+="Make small, atomic commits with clear messages. "
+    PROMPT+="Push to origin/${BRANCH} after each commit. "
     PROMPT+="Work autonomously - do not ask questions, make your best judgment."
 
     # Session name for tmux (sanitized)
