@@ -41,6 +41,7 @@ chown git:git /home/git
 # SSH sessions don't inherit Docker env vars, so this bridges the gap.
 ENV_FILE="/home/git/.claude-env"
 : > "$ENV_FILE"
+printf 'export CLAUDE_CONTAINER_NAME=%q\n' "claude-${CLAUDE_INSTANCE:-default}" >> "$ENV_FILE"
 if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
     printf 'export CLAUDE_CODE_OAUTH_TOKEN=%q\n' "${CLAUDE_CODE_OAUTH_TOKEN}" >> "$ENV_FILE"
     echo "  Claude auth: OAuth token set."

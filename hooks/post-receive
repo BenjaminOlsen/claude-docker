@@ -35,6 +35,8 @@ mkdir -p "$LOG_DIR"
 # Determine repo name from the bare repo path
 BARE_REPO="$(pwd)"
 REPO_NAME="$(basename "$BARE_REPO" .git)"
+# Sanitize for use in file paths and the tmux command string
+REPO_NAME_SAFE="${REPO_NAME//[^a-zA-Z0-9._-]/_}"
 
 while read -r OLD_REV NEW_REV REF; do
     # Skip deleted branches
@@ -53,8 +55,8 @@ while read -r OLD_REV NEW_REV REF; do
     # Replace everything except alphanumeric, dot, hyphen, and underscore with _.
     BRANCH_SAFE="${BRANCH//[^a-zA-Z0-9._-]/_}"
     TIMESTAMP="$(date +%Y-%m-%d/%H_%M_%S)"
-    CLONE_DIR="${WORK_DIR}/${REPO_NAME}/${BRANCH_SAFE}/${TIMESTAMP}"
-    LOGFILE="${LOG_DIR}/${REPO_NAME}_${BRANCH_SAFE}_$(date +%Y%m%d_%H%M%S).log"
+    CLONE_DIR="${WORK_DIR}/${REPO_NAME_SAFE}/${BRANCH_SAFE}/${TIMESTAMP}"
+    LOGFILE="${LOG_DIR}/${REPO_NAME_SAFE}_${BRANCH_SAFE}_$(date +%Y%m%d_%H%M%S).log"
 
     echo "==> Claude Docker: received push to ${REPO_NAME}/${BRANCH}" >&2
     echo "==> Work directory: ${CLONE_DIR}" >&2
@@ -130,7 +132,7 @@ while read -r OLD_REV NEW_REV REF; do
     tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
 
     echo "==> Starting Claude in tmux session: ${SESSION_NAME}" >&2
-    echo "==> Attach with: docker exec -it claude-docker tmux attach -t ${SESSION_NAME}" >&2
+    echo "==> Attach with: docker exec -it ${CLAUDE_CONTAINER_NAME:-claude-docker} tmux attach -t ${SESSION_NAME}" >&2
 
     # Write prompt to a file and use a launcher script to avoid quoting issues
     # across tmux -> script -> claude. 'script -f' allocates a PTY so output
@@ -145,10 +147,13 @@ exec claude -p "$(cat .claude-prompt)" --dangerously-skip-permissions
 LAUNCHER_EOF
     chmod +x "$LAUNCHER"
 
+    # Exclude working files from git so Claude doesn't accidentally commit them
+    printf '.claude-prompt\n.claude-launcher.sh\n' >> "${CLONE_DIR}/.git/info/exclude"
+
     tmux new-session -d -s "$SESSION_NAME" -c "$CLONE_DIR" \
         "script -q -f -c '${LAUNCHER}' '${LOGFILE}'; echo '=== Claude finished at \$(date) ===' >> '${LOGFILE}'"
 
     echo "==> Claude is working autonomously on ${REPO_NAME}/${WORK_BRANCH}" >&2
     echo "==> Pull Claude's work: git pull claude ${WORK_BRANCH}" >&2
-    echo "==> Watch logs: docker exec -it claude-docker tail -f ${LOGFILE}" >&2
+    echo "==> Watch logs: docker exec -it ${CLAUDE_CONTAINER_NAME:-claude-docker} tail -f ${LOGFILE}" >&2
 done
