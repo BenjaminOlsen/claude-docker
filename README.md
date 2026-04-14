@@ -77,8 +77,8 @@ You'll see output like:
 # Attach to the tmux session
 ./run.sh --attach claude-myproject-main
 
-# Or tail the log
-docker exec claude-docker tail -f /home/git/logs/myproject_main_*.log
+# Or tail the log (container name is claude-<name>, e.g. claude-default)
+docker exec claude-default tail -f /home/git/logs/myproject_main_*.log
 ```
 
 Detach from tmux with `Ctrl-b d`.
@@ -115,8 +115,10 @@ git push -o prompt="Focus on the auth module only" claude main
 
 ## Launcher script
 
+Every instance has a **name** (set with `-n <name>`, defaults to `default`). The name determines the container name (`claude-<name>`), the compose project, and the volume namespace.
+
 ```bash
-./run.sh                            # Start default instance (port 2222)
+./run.sh                            # Start instance named "default" (port 2222)
 ./run.sh --build                    # Rebuild and start
 ./run.sh --stop                     # Stop the container
 ./run.sh --status                   # Show active repos and Claude sessions
@@ -124,6 +126,11 @@ git push -o prompt="Focus on the auth module only" claude main
 ./run.sh --logs                     # Follow container logs
 ./run.sh --shell                    # Root shell in the container
 ./run.sh --list                     # List all running instances
+
+# Named instances
+./run.sh -n myworker -p 2223 --build    # Instance named "myworker" on port 2223
+./run.sh -n myworker --status            # Status for "myworker"
+./run.sh -n myworker --stop              # Stop "myworker"
 ```
 
 ## Multiple instances
@@ -131,32 +138,32 @@ git push -o prompt="Focus on the auth module only" claude main
 You can run multiple containers in parallel, each on its own port with isolated volumes:
 
 ```bash
-# Start three independent workers
-./run.sh --build                            # "default" on port 2222
-./run.sh -n worker2 -p 2223 --build         # "worker2" on port 2223
-./run.sh -n worker3 -p 2224 --build         # "worker3" on port 2224
+# Start three independent workers (each -n name becomes the container suffix)
+./run.sh -n alpha -p 2222 --build           # container: claude-alpha, port 2222
+./run.sh -n bravo -p 2223 --build           # container: claude-bravo, port 2223
+./run.sh -n charlie -p 2224 --build         # container: claude-charlie, port 2224
 
 # Each gets its own git remote
-git remote add claude   ssh://git@localhost:2222/repos/myproject
-git remote add worker2  ssh://git@localhost:2223/repos/myproject
-git remote add worker3  ssh://git@localhost:2224/repos/myproject
+git remote add alpha    ssh://git@localhost:2222/repos/myproject
+git remote add bravo    ssh://git@localhost:2223/repos/myproject
+git remote add charlie  ssh://git@localhost:2224/repos/myproject
 
 # Push the same repo to multiple workers with different AGENTS.md on different branches,
 # or push entirely different repos to each
-git push claude  main
-git push worker2 main
-git push worker3 experiment-branch
+git push alpha   main
+git push bravo   main
+git push charlie experiment-branch
 
 # Manage them independently
-./run.sh -n worker2 --status
-./run.sh -n worker2 --attach claude-myproject-main
-./run.sh -n worker3 --stop
+./run.sh -n bravo --status
+./run.sh -n bravo --attach claude-myproject-main
+./run.sh -n charlie --stop
 
 # List all running instances
 ./run.sh --list
 ```
 
-Each instance gets its own container name (`claude-default`, `claude-worker2`, ...), port, and volumes (repos, work dirs, logs are all isolated).
+Each instance gets its own container (`claude-<name>`), port, and volumes (repos, work dirs, logs are all isolated).
 
 ## Configuration
 
@@ -250,8 +257,8 @@ Key components:
 Make sure your public key is mounted correctly:
 
 ```bash
-# Check the key is there
-docker exec claude-docker cat /home/git/.ssh/authorized_keys
+# Check the key is there (use your instance name, e.g. "default")
+docker exec claude-default cat /home/git/.ssh/authorized_keys
 
 # Test SSH connection
 ssh -p 2222 -T git@localhost
@@ -261,10 +268,10 @@ ssh -p 2222 -T git@localhost
 
 ```bash
 # Check if tmux sessions exist
-docker exec claude-docker tmux list-sessions
+./run.sh --status
 
 # Check logs
-docker exec claude-docker ls /home/git/logs/
+docker exec claude-default ls /home/git/logs/
 
 # Get a shell and debug
 ./run.sh --shell
@@ -274,7 +281,7 @@ docker exec claude-docker ls /home/git/logs/
 
 ```bash
 ./run.sh --stop
-docker compose down -v   # removes volumes too
+docker compose -p claude-default down -v   # removes volumes too (use your -n name)
 ./run.sh --build
 ```
 

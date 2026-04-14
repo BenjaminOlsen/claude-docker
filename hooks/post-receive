@@ -11,6 +11,13 @@
 
 set -euo pipefail
 
+# Clear git environment variables inherited from git-receive-pack.
+# These interfere with git clone/checkout operations inside the hook.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+
+# Ensure PATH includes npm global bin (where claude is installed)
+export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
+
 REPOS_DIR="/home/git/repos"
 WORK_DIR="/home/git/work"
 LOG_DIR="/home/git/logs"
@@ -43,10 +50,10 @@ while read -r OLD_REV NEW_REV REF; do
     echo "==> Log file: ${LOGFILE}" >&2
 
     # Clone into work directory
-    mkdir -p "$CLONE_DIR"
-    git clone "$BARE_REPO" "$CLONE_DIR" 2>/dev/null
+    mkdir -p "$(dirname "$CLONE_DIR")"
+    git clone "$BARE_REPO" "$CLONE_DIR" >&2
     cd "$CLONE_DIR"
-    git checkout "$BRANCH" 2>/dev/null
+    git checkout "$BRANCH" >&2
 
     # Configure git identity for Claude's commits
     git config user.name "Claude"
