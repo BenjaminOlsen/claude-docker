@@ -42,10 +42,10 @@ chown git:git /home/git
 ENV_FILE="/home/git/.claude-env"
 : > "$ENV_FILE"
 if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-    echo "export CLAUDE_CODE_OAUTH_TOKEN='${CLAUDE_CODE_OAUTH_TOKEN}'" >> "$ENV_FILE"
+    printf 'export CLAUDE_CODE_OAUTH_TOKEN=%q\n' "${CLAUDE_CODE_OAUTH_TOKEN}" >> "$ENV_FILE"
     echo "  Claude auth: OAuth token set."
 elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-    echo "export ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY}'" >> "$ENV_FILE"
+    printf 'export ANTHROPIC_API_KEY=%q\n' "${ANTHROPIC_API_KEY}" >> "$ENV_FILE"
     echo "  Claude auth: API key set."
 else
     echo "WARNING: No Claude credentials found." >&2
