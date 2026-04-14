@@ -18,6 +18,7 @@ services:
     environment:
       - HOST_UID=${HOST_UID:-1000}
       - HOST_GID=${HOST_GID:-1000}
+      - CLAUDE_INSTANCE=${CLAUDE_INSTANCE:-default}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # OAuth token (Pro/Max plan) -- generate with: claude setup-token
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
