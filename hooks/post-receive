@@ -66,6 +66,11 @@ while read -r OLD_REV NEW_REV REF; do
     cd "$CLONE_DIR"
     git checkout "$BRANCH" >&2
 
+    # Create a separate branch for Claude's work so it doesn't collide
+    # with the user's branch. The user can pull and merge at their discretion.
+    WORK_BRANCH="claude/${BRANCH}"
+    git checkout -b "$WORK_BRANCH" >&2
+
     # Configure git identity for Claude's commits
     git config user.name "Claude"
     git config user.email "claude@docker.local"
@@ -114,7 +119,7 @@ while read -r OLD_REV NEW_REV REF; do
 
     # Append common instructions
     PROMPT+="Make small, atomic commits with clear messages. "
-    PROMPT+="Push to origin/${BRANCH} after each commit. "
+    PROMPT+="Push to origin/${WORK_BRANCH} after each commit. "
     PROMPT+="Work autonomously - do not ask questions, make your best judgment."
 
     # Session name for tmux (sanitized)
@@ -143,6 +148,7 @@ LAUNCHER_EOF
     tmux new-session -d -s "$SESSION_NAME" -c "$CLONE_DIR" \
         "script -q -f -c '${LAUNCHER}' '${LOGFILE}'; echo '=== Claude finished at \$(date) ===' >> '${LOGFILE}'"
 
-    echo "==> Claude is working autonomously on ${REPO_NAME}/${BRANCH}" >&2
+    echo "==> Claude is working autonomously on ${REPO_NAME}/${WORK_BRANCH}" >&2
+    echo "==> Pull Claude's work: git pull claude ${WORK_BRANCH}" >&2
     echo "==> Watch logs: docker exec -it claude-docker tail -f ${LOGFILE}" >&2
 done

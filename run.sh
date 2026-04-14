@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
             SSH_KEY="$2"
             shift 2
             ;;
-        --build|--stop|--destroy|--logs|--status|--shell)
+        --build|--stop|--destroy|--logs|--status|--shell|--kill)
             ACTION="$1"
             shift
             ;;
@@ -94,6 +94,10 @@ case "${ACTION:-start}" in
         else
             echo "Cancelled."
         fi
+        ;;
+    --kill)
+        echo "Killing all Claude sessions in [${INSTANCE}]..."
+        docker exec -u git "$CONTAINER_NAME" tmux kill-server 2>/dev/null && echo "Done." || echo "No sessions running."
         ;;
     --logs)
         $COMPOSE logs -f
