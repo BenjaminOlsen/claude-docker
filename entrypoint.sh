@@ -18,6 +18,21 @@ if [ ! -f "$HOST_KEYS_DIR/ssh_host_ed25519_key" ]; then
     ssh-keygen -t rsa -b 4096 -f "$HOST_KEYS_DIR/ssh_host_rsa_key" -N "" -q
 fi
 
+# Grant git user access to the Docker socket (if mounted)
+if [ -S /var/run/docker.sock ]; then
+    DOCKER_GID="$(stat -c '%g' /var/run/docker.sock)"
+    if getent group "$DOCKER_GID" >/dev/null 2>&1; then
+        DOCKER_GROUP="$(getent group "$DOCKER_GID" | cut -d: -f1)"
+    else
+        groupadd -g "$DOCKER_GID" docker 2>/dev/null || true
+        DOCKER_GROUP="docker"
+    fi
+    usermod -aG "$DOCKER_GROUP" git
+    echo "  Docker socket available (gid=${DOCKER_GID})."
+else
+    echo "  Docker socket not mounted (Claude won't be able to run docker commands)."
+fi
+
 # Ensure authorized_keys exists and has correct permissions
 AUTH_KEYS="/home/git/.ssh/authorized_keys"
 if [ ! -f "$AUTH_KEYS" ]; then

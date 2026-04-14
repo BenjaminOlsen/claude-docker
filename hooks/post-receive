@@ -110,16 +110,72 @@ while read -r OLD_REV NEW_REV REF; do
     SESSION_NAME="claude-${REPO_NAME}-${BRANCH}"
     SESSION_NAME="${SESSION_NAME//[^a-zA-Z0-9_-]/_}"
 
-    # Kill any existing session with the same name
-    tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
+    # Kill any existing tmux server (cleans up stale sockets).
+    # Without this, killing the last session leaves a dead socket that
+    # causes "server exited unexpectedly" on the next new-session.
+    tmux kill-server 2>/dev/null || true
+    sleep 0.5
 
     echo "==> Starting Claude in tmux session: ${SESSION_NAME}" >&2
-    echo "==> Attach with: docker exec -it claude-docker tmux attach -t ${SESSION_NAME}" >&2
+    echo "==> Attach with: ./run.sh --attach ${SESSION_NAME}" >&2
 
-    # Launch Claude in a tmux session
+    # Launch Claude in print mode with streaming JSON output.
+    # Plain -p produces no output until done; stream-json gives live progress.
+    # Pipe through jq to extract readable text and tool calls.
+    JQ_FILTER_FILE="${CLONE_DIR}/.claude-stream-filter.jq"
+    cat > "$JQ_FILTER_FILE" << 'JQEOF'
+def format_tool:
+  if .name == "Read" then
+    ">>> Read: \(.input.file_path)\(if .input.offset then " (lines \(.input.offset)-\(.input.offset + (.input.limit // 200)))" else "" end)"
+  elif .name == "Bash" then
+    ">>> $ \(.input.command[:150])"
+  elif .name == "Edit" then
+    ">>> Edit: \(.input.file_path)"
+  elif .name == "Write" then
+    ">>> Write: \(.input.file_path)"
+  elif .name == "Glob" then
+    ">>> Glob: \(.input.pattern)"
+  elif .name == "Grep" then
+    ">>> Grep: \(.input.pattern)\(if .input.path then " in \(.input.path)" else "" end)"
+  elif .name == "Task" then
+    ">>> Agent: \(.input.description // .input.prompt[:80])"
+  else
+    ">>> \(.name): \(.input.description // (.input | tostring)[:100])"
+  end;
+def format_content:
+  if type == "array" then
+    .[] | format_content
+  elif .type == "thinking" then
+    "[thinking] \(.thinking[:300])"
+  elif .type == "text" then
+    .text
+  elif .type == "tool_use" then
+    format_tool
+  else
+    empty
+  end;
+if .type == "assistant" then
+  .message.content | format_content
+elif .type == "user" and .tool_use_result then
+  if (.tool_use_result | type) == "string" then
+    "    \(.tool_use_result[:200])"
+  elif .tool_use_result.stdout then
+    "    \((.tool_use_result.stdout // "")[:200])"
+  else
+    empty
+  end
+elif .type == "result" then
+  "\n=== Done (cost: $\(.total_cost_usd // 0)) ==="
+else
+  empty
+end
+JQEOF
+
     tmux new-session -d -s "$SESSION_NAME" -c "$CLONE_DIR" \
-        "claude -p '${PROMPT}' --dangerously-skip-permissions 2>&1 | tee '${LOGFILE}'; echo '=== Claude finished at $(date) ===' >> '${LOGFILE}'"
+        "claude -p '${PROMPT}' --dangerously-skip-permissions --output-format stream-json --verbose 2>&1 | tee '${LOGFILE}.json' | jq -r --unbuffered -f '${JQ_FILTER_FILE}' | tee '${LOGFILE}'; echo '=== Claude finished at \$(date) ===' >> '${LOGFILE}'"
 
     echo "==> Claude is working autonomously on ${REPO_NAME}/${BRANCH}" >&2
-    echo "==> Watch logs: docker exec -it claude-docker tail -f ${LOGFILE}" >&2
+    echo "==> Watch live: ./run.sh --attach ${SESSION_NAME}" >&2
+    echo "==> Transcript: ${LOGFILE}" >&2
+    echo "==> Raw JSON: ${LOGFILE}.json" >&2
 done

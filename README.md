@@ -13,7 +13,7 @@ Inspired by [aquanauts/legit](https://github.com/aquanauts/legit).
 │  copy        │                   │  post-receive hook fires:    │
 │              │                   │    1. clone into /work/       │
 │              │  git pull claude  │    2. read AGENTS.md          │
-│              │ ◀──────────────── │    3. claude -p "..." --yolo  │
+│              │ ◀──────────────── │    3. claude -p "..." (autonomous) │
 │              │                   │    4. claude commits & pushes │
 └─────────────┘                   └──────────────────────────────┘
 ```
@@ -65,21 +65,23 @@ git push -o prompt="Fix the failing tests in src/auth" claude main
 You'll see output like:
 
 ```
-==> Claude Docker: received push to myproject/main
+==> Claude Docker: received push to <your-repo>/main
 ==> Found AGENTS.md - Claude will follow its instructions
-==> Starting Claude in tmux session: claude-myproject-main
-==> Claude is working autonomously on myproject/main
+==> Starting Claude in tmux session: claude-<your-repo>-main
+==> Claude is working autonomously on <your-repo>/main
 ```
 
 ### 4. Watch Claude work (optional)
 
 ```bash
-# Attach to the tmux session
-./run.sh --attach claude-myproject-main
+# Attach to the tmux session to see live thinking and tool calls
+./run.sh --attach <session-name>
 
-# Or tail the log (container name is claude-<name>, e.g. claude-default)
-docker exec claude-default tail -f /home/git/logs/myproject_main_*.log
+# Or tail the filtered log (container name is claude-<name>, e.g. claude-default)
+docker exec claude-default tail -f /home/git/logs/<your-repo>_<branch>_*.log
 ```
+
+The tmux session shows a filtered stream: Claude's thinking, text output, and tool calls (file reads, edits, bash commands, etc.). The raw JSON stream is also saved for debugging.
 
 Detach from tmux with `Ctrl-b d`.
 
@@ -231,17 +233,18 @@ Container filesystem:
 ├── .ssh/authorized_keys     # mounted from host (read-only)
 ├── .claude/                 # mounted from host (Claude credentials)
 ├── repos/                   # bare git repos (auto-created on push)
-│   └── myproject.git/
+│   └── <your-repo>.git/
 │       └── hooks/post-receive
 ├── hooks/                   # default hooks (copied into new repos)
 │   └── post-receive
 ├── work/                    # ephemeral clones where Claude works
-│   └── myproject/
+│   └── <your-repo>/
 │       └── main/
 │           └── 2025-01-15/
 │               └── 14_30_00/   # timestamped clone
 └── logs/                    # Claude session logs
-    └── myproject_main_20250115_143000.log
+    ├── <your-repo>_<branch>_20250115_143000.log       # filtered readable transcript
+    └── <your-repo>_<branch>_20250115_143000.log.json  # raw stream-json output
 ```
 
 Key components:
@@ -298,7 +301,7 @@ git push claude main
 Your git client opens an SSH connection to `localhost:2222`, which Docker forwards to port 22 inside the container. SSH sends the command:
 
 ```
-git-receive-pack '/repos/myproject'
+git-receive-pack '/repos/<your-repo>'
 ```
 
 ### 2. SSH authenticates and forces the wrapper
@@ -309,11 +312,11 @@ sshd receives the connection and runs `authorized-keys-command.sh` to look up yo
 command="/usr/local/bin/git-shell-wrapper",no-port-forwarding ... ssh-ed25519 AAAA...
 ```
 
-This means no matter what the SSH client asks to run, sshd runs `git-shell-wrapper` instead. The original command (`git-receive-pack '/repos/myproject'`) gets stashed in the `$SSH_ORIGINAL_COMMAND` environment variable.
+This means no matter what the SSH client asks to run, sshd runs `git-shell-wrapper` instead. The original command (`git-receive-pack '/repos/<your-repo>'`) gets stashed in the `$SSH_ORIGINAL_COMMAND` environment variable.
 
 ### 3. git-shell-wrapper auto-creates the repo
 
-The wrapper parses `$SSH_ORIGINAL_COMMAND` to extract the repo path. If `/home/git/repos/myproject.git` doesn't exist yet, it:
+The wrapper parses `$SSH_ORIGINAL_COMMAND` to extract the repo path. If `/home/git/repos/<your-repo>.git` doesn't exist yet, it:
 
 1. Runs `git init --bare` to create it
 2. Copies the default hooks from `/home/git/hooks/` (including `post-receive`) into the new repo's `hooks/` directory
@@ -330,15 +333,15 @@ After git finishes writing the pushed objects, it automatically runs the `post-r
 
 The hook:
 
-1. **Clones** the bare repo into a fresh timestamped directory: `/home/git/work/myproject/main/2026-04-13/14_30_00/`
+1. **Clones** the bare repo into a fresh timestamped directory: `/home/git/work/<your-repo>/<branch>/2026-04-13/14_30_00/`
 2. **Checks out** the pushed branch
 3. **Looks for instructions** -- `AGENTS.md`, then `CLAUDE.md`, then `.claude-docker-hook`
 4. **Builds a prompt** from what it finds
 5. **Launches Claude** inside a detached tmux session:
 
 ```bash
-tmux new-session -d -s "claude-myproject-main" \
-    "claude -p '<prompt>' --dangerously-skip-permissions 2>&1 | tee logfile"
+tmux new-session -d -s "claude-<your-repo>-<branch>" \
+    "claude -p '<prompt>' --dangerously-skip-permissions --output-format stream-json --verbose 2>&1 | tee logfile.json | jq -r -f filter.jq | tee logfile"
 ```
 
 At this point your `git push` returns -- the hook launched tmux in the background and didn't wait for Claude to finish.
@@ -351,7 +354,7 @@ Claude is now running in that cloned working directory with full permissions. It
 git push origin/main
 ```
 
-That `origin` points back to the bare repo inside the container (since the work directory was cloned from it). So Claude's commits land in `/home/git/repos/myproject.git`.
+That `origin` points back to the bare repo inside the container (since the work directory was cloned from it). So Claude's commits land in `/home/git/repos/<your-repo>.git`.
 
 ### 6. You pull Claude's work
 
@@ -389,13 +392,13 @@ SSH to localhost:2222 ──────────▶  sshd
                                    (clones repo → work dir, reads AGENTS.md)
                                       │
                                       ▼
-                                   tmux session ──▶ claude -p "..." --dangerously-skip-permissions
-                                                        │
+                                   tmux session ──▶ claude -p "..." --output-format stream-json
+                                                        │ (piped through jq for readable output)
                                                         ▼
                                                    (edits, tests, commits)
                                                         │
                                                         ▼
-                                                   git push origin/main
+                                                   git push origin/<branch>
                                                    (back to the bare repo)
     │
     ▼

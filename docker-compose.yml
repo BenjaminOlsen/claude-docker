@@ -13,6 +13,8 @@ services:
       # Mounted read-write so the CLI can refresh tokens
       - ${HOME}/.claude/.credentials.json:/home/git/.claude/.credentials.json
       - ${HOME}/.claude/settings.json:/home/git/.claude/settings.json:ro
+      # Docker socket (so Claude can run docker/compose for project tests)
+      - /var/run/docker.sock:/var/run/docker.sock
       # Persistent repos and work dirs
       - repos:/home/git/repos
       - work:/home/git/work
