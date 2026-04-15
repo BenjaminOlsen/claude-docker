@@ -47,22 +47,29 @@ chown git:git /home/git/.ssh
 chmod 600 "$AUTH_KEYS" 2>/dev/null || true
 chown git:git "$AUTH_KEYS" 2>/dev/null || true
 
-# Ensure Claude credentials directory exists, own what we can
+# Ensure Claude config directory exists
 mkdir -p /home/git/.claude
 chown git:git /home/git/.claude
-chown git:git /home/git/.claude/.credentials.json 2>/dev/null || true
-chown git:git /home/git/.claude/settings.json 2>/dev/null || true
-
 chown git:git /home/git
 
-# Verify Claude credentials
-if [ -f "/home/git/.claude/.credentials.json" ]; then
-    echo "  Claude OAuth credentials found."
+# Write Claude auth env vars to a file the post-receive hook can source.
+# SSH sessions don't inherit Docker env vars, so this bridges the gap.
+ENV_FILE="/home/git/.claude-env"
+: > "$ENV_FILE"
+printf 'export CLAUDE_CONTAINER_NAME=%q\n' "claude-${CLAUDE_INSTANCE:-default}" >> "$ENV_FILE"
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+    printf 'export CLAUDE_CODE_OAUTH_TOKEN=%q\n' "${CLAUDE_CODE_OAUTH_TOKEN}" >> "$ENV_FILE"
+    echo "  Claude auth: OAuth token set."
+elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    printf 'export ANTHROPIC_API_KEY=%q\n' "${ANTHROPIC_API_KEY}" >> "$ENV_FILE"
+    echo "  Claude auth: API key set."
 else
     echo "WARNING: No Claude credentials found." >&2
-    echo "  Mount your credentials: -v ~/.claude/.credentials.json:/home/git/.claude/.credentials.json" >&2
+    echo "  Set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token' to generate)" >&2
     echo "  Or set ANTHROPIC_API_KEY in the environment." >&2
 fi
+chmod 600 "$ENV_FILE"
+chown git:git "$ENV_FILE"
 
 # Ensure work and log dirs exist
 mkdir -p /home/git/work /home/git/logs /home/git/repos

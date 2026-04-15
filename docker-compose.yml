@@ -6,13 +6,9 @@ services:
       - "${SSH_PORT:-2222}:22"
     volumes:
       # Your SSH public key (for git push authentication)
-      - ${HOME}/.ssh/id_ed25519.pub:/home/git/.ssh/authorized_keys:ro
+      - ${SSH_PUBKEY:-~/.ssh/id_ed25519.pub}:/home/git/.ssh/authorized_keys:ro
       # Persistent SSH host keys (so fingerprint doesn't change on rebuild)
       - ssh-host-keys:/etc/ssh/ssh_host_keys
-      # Claude OAuth credentials (Pro/Max plan)
-      # Mounted read-write so the CLI can refresh tokens
-      - ${HOME}/.claude/.credentials.json:/home/git/.claude/.credentials.json
-      - ${HOME}/.claude/settings.json:/home/git/.claude/settings.json:ro
       # Docker socket (so Claude can run docker/compose for project tests)
       - /var/run/docker.sock:/var/run/docker.sock
       # Persistent repos and work dirs
@@ -24,7 +20,10 @@ services:
     environment:
       - HOST_UID=${HOST_UID:-1000}
       - HOST_GID=${HOST_GID:-1000}
+      - CLAUDE_INSTANCE=${CLAUDE_INSTANCE:-default}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # OAuth token (Pro/Max plan) -- generate with: claude setup-token
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       # Firewall: set to "false" to allow unrestricted outbound access
       - FIREWALL_ENABLED=${FIREWALL_ENABLED:-true}
       # Firewall: comma-separated extra domains to whitelist

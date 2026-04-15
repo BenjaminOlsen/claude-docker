@@ -38,10 +38,16 @@ Inspired by [aquanauts/legit](https://github.com/aquanauts/legit).
 ./run.sh --build
 ```
 
+The launcher auto-detects your SSH public key (`~/.ssh/id_ed25519.pub`, then `~/.ssh/id_rsa.pub`). To use a specific key:
+
+```bash
+./run.sh -k ~/.ssh/my_key.pub --build
+```
+
 Or with docker compose directly:
 
 ```bash
-HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build -d
+SSH_PUBKEY=~/.ssh/id_ed25519.pub HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build -d
 ```
 
 ### 2. Add the remote to your project
@@ -81,7 +87,7 @@ You'll see output like:
 docker exec claude-default tail -f /home/git/logs/<your-repo>_<branch>_*.log
 ```
 
-The tmux session shows a filtered stream: Claude's thinking, text output, and tool calls (file reads, edits, bash commands, etc.). The raw JSON stream is also saved for debugging.
+The tmux session shows Claude's live output. The full session transcript is also saved to a log file.
 
 Detach from tmux with `Ctrl-b d`.
 
@@ -172,20 +178,31 @@ Each instance gets its own container (`claude-<name>`), port, and volumes (repos
 
 ### SSH key
 
-By default, `docker-compose.yml` mounts `~/.ssh/id_ed25519.pub`. If you use a different key:
+The launcher auto-detects your SSH public key (tries `~/.ssh/id_ed25519.pub`, then `~/.ssh/id_rsa.pub`). To use a specific key:
 
-```yaml
-volumes:
-  - ~/.ssh/id_rsa.pub:/home/git/.ssh/authorized_keys:ro
+```bash
+./run.sh -k ~/.ssh/my_key.pub --build
+```
+
+Or set `SSH_PUBKEY` when using docker compose directly:
+
+```bash
+SSH_PUBKEY=~/.ssh/id_rsa.pub HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build -d
 ```
 
 ### Claude authentication
 
-**Pro/Max plan (OAuth):** The compose file mounts your `~/.claude/.credentials.json` into the container. The CLI uses the refresh token to stay authenticated headlessly -- no browser needed after your initial `claude login` on the host.
+**Pro/Max plan (OAuth):** Generate a long-lived token, then add it to your `.env` file:
 
-The credentials file is mounted read-write so the CLI can refresh expired tokens.
+```bash
+claude setup-token          # follow the prompts, copy the token
+```
 
-**API key (pay-as-you-go):** Alternatively, create a `.env` file next to `docker-compose.yml`:
+```env
+CLAUDE_CODE_OAUTH_TOKEN=<your-token>
+```
+
+**API key (pay-as-you-go):** Create a `.env` file next to `docker-compose.yml`:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
@@ -231,7 +248,7 @@ Note: domains are resolved to IPs at container startup. If Anthropic's IPs rotat
 Container filesystem:
 /home/git/
 ├── .ssh/authorized_keys     # mounted from host (read-only)
-├── .claude/                 # mounted from host (Claude credentials)
+├── .claude/                 # Claude config dir (credentials via env vars)
 ├── repos/                   # bare git repos (auto-created on push)
 │   └── <your-repo>.git/
 │       └── hooks/post-receive
@@ -243,8 +260,7 @@ Container filesystem:
 │           └── 2025-01-15/
 │               └── 14_30_00/   # timestamped clone
 └── logs/                    # Claude session logs
-    ├── <your-repo>_<branch>_20250115_143000.log       # filtered readable transcript
-    └── <your-repo>_<branch>_20250115_143000.log.json  # raw stream-json output
+    └── <your-repo>_<branch>_20250115_143000.log       # session transcript (via script -f)
 ```
 
 Key components:
@@ -337,11 +353,12 @@ The hook:
 2. **Checks out** the pushed branch
 3. **Looks for instructions** -- `AGENTS.md`, then `CLAUDE.md`, then `.claude-docker-hook`
 4. **Builds a prompt** from what it finds
-5. **Launches Claude** inside a detached tmux session:
+5. **Launches Claude** inside a detached tmux session. The prompt is written to a file and a launcher script runs it via `script -f` (which allocates a PTY for live-streaming output):
 
 ```bash
 tmux new-session -d -s "claude-<your-repo>-<branch>" \
-    "claude -p '<prompt>' --dangerously-skip-permissions --output-format stream-json --verbose 2>&1 | tee logfile.json | jq -r -f filter.jq | tee logfile"
+    "script -q -f -c '.claude-launcher.sh' logfile"
+# .claude-launcher.sh: exec claude -p "$(cat .claude-prompt)" --dangerously-skip-permissions
 ```
 
 At this point your `git push` returns -- the hook launched tmux in the background and didn't wait for Claude to finish.
@@ -392,8 +409,11 @@ SSH to localhost:2222 ──────────▶  sshd
                                    (clones repo → work dir, reads AGENTS.md)
                                       │
                                       ▼
-                                   tmux session ──▶ claude -p "..." --output-format stream-json
-                                                        │ (piped through jq for readable output)
+                                   tmux session ──▶ script -f -c .claude-launcher.sh logfile
+                                                        │
+                                                        ▼
+                                                   claude -p "..." --dangerously-skip-permissions
+                                                        │
                                                         ▼
                                                    (edits, tests, commits)
                                                         │

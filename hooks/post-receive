@@ -11,12 +11,21 @@
 
 set -euo pipefail
 
+# Only run for pushes over SSH (from the user). Skip local pushes (from Claude
+# pushing back to the bare repo) to prevent an infinite loop.
+if [ -z "${SSH_CONNECTION:-}" ]; then
+    exit 0
+fi
+
 # Clear git environment variables inherited from git-receive-pack.
 # These interfere with git clone/checkout operations inside the hook.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 
 # Ensure PATH includes npm global bin (where claude is installed)
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
+
+# Load Claude auth credentials (written by entrypoint.sh)
+[ -f /home/git/.claude-env ] && source /home/git/.claude-env
 
 REPOS_DIR="/home/git/repos"
 WORK_DIR="/home/git/work"
@@ -26,6 +35,8 @@ mkdir -p "$LOG_DIR"
 # Determine repo name from the bare repo path
 BARE_REPO="$(pwd)"
 REPO_NAME="$(basename "$BARE_REPO" .git)"
+# Sanitize for use in file paths and the tmux command string
+REPO_NAME_SAFE="${REPO_NAME//[^a-zA-Z0-9._-]/_}"
 
 while read -r OLD_REV NEW_REV REF; do
     # Skip deleted branches
@@ -40,10 +51,12 @@ while read -r OLD_REV NEW_REV REF; do
     esac
 
     BRANCH="${REF#refs/heads/}"
-    BRANCH_SAFE="${BRANCH//\//_}"
+    # Sanitize branch name for use in file paths and shell-interpolated contexts.
+    # Replace everything except alphanumeric, dot, hyphen, and underscore with _.
+    BRANCH_SAFE="${BRANCH//[^a-zA-Z0-9._-]/_}"
     TIMESTAMP="$(date +%Y-%m-%d/%H_%M_%S)"
-    CLONE_DIR="${WORK_DIR}/${REPO_NAME}/${BRANCH_SAFE}/${TIMESTAMP}"
-    LOGFILE="${LOG_DIR}/${REPO_NAME}_${BRANCH_SAFE}_$(date +%Y%m%d_%H%M%S).log"
+    CLONE_DIR="${WORK_DIR}/${REPO_NAME_SAFE}/${BRANCH_SAFE}/${TIMESTAMP}"
+    LOGFILE="${LOG_DIR}/${REPO_NAME_SAFE}_${BRANCH_SAFE}_$(date +%Y%m%d_%H%M%S).log"
 
     echo "==> Claude Docker: received push to ${REPO_NAME}/${BRANCH}" >&2
     echo "==> Work directory: ${CLONE_DIR}" >&2
@@ -54,6 +67,11 @@ while read -r OLD_REV NEW_REV REF; do
     git clone "$BARE_REPO" "$CLONE_DIR" >&2
     cd "$CLONE_DIR"
     git checkout "$BRANCH" >&2
+
+    # Create a separate branch for Claude's work so it doesn't collide
+    # with the user's branch. The user can pull and merge at their discretion.
+    WORK_BRANCH="claude/${BRANCH}"
+    git checkout -b "$WORK_BRANCH" >&2
 
     # Configure git identity for Claude's commits
     git config user.name "Claude"
@@ -92,7 +110,7 @@ while read -r OLD_REV NEW_REV REF; do
         PROMPT+="Read and follow the instructions in CLAUDE.md. "
         echo "==> Found CLAUDE.md - Claude will follow its instructions" >&2
     else
-        PROMPT+="Analyze the codebase thoroughly. Look for TODOs, bugs, and improvements. "
+        PROMPT+="Analyze the codebase thoroughly. Look for TODOs, bugs, and improvements. Keep going until there is nothing left to do. "
         echo "==> No AGENTS.md or CLAUDE.md found - Claude will analyze the code" >&2
     fi
 
@@ -102,8 +120,8 @@ while read -r OLD_REV NEW_REV REF; do
     fi
 
     # Append common instructions
-    PROMPT+="When you are done, commit your changes with clear commit messages. "
-    PROMPT+="Push your commits to origin/${BRANCH} when finished. "
+    PROMPT+="Make small, atomic commits with clear messages. "
+    PROMPT+="Push to origin/${WORK_BRANCH} after each commit. "
     PROMPT+="Work autonomously - do not ask questions, make your best judgment."
 
     # Session name for tmux (sanitized)
@@ -117,65 +135,28 @@ while read -r OLD_REV NEW_REV REF; do
     sleep 0.5
 
     echo "==> Starting Claude in tmux session: ${SESSION_NAME}" >&2
-    echo "==> Attach with: ./run.sh --attach ${SESSION_NAME}" >&2
+    echo "==> Attach with: docker exec -it ${CLAUDE_CONTAINER_NAME:-claude-docker} tmux attach -t ${SESSION_NAME}" >&2
 
-    # Launch Claude in print mode with streaming JSON output.
-    # Plain -p produces no output until done; stream-json gives live progress.
-    # Pipe through jq to extract readable text and tool calls.
-    JQ_FILTER_FILE="${CLONE_DIR}/.claude-stream-filter.jq"
-    cat > "$JQ_FILTER_FILE" << 'JQEOF'
-def format_tool:
-  if .name == "Read" then
-    ">>> Read: \(.input.file_path)\(if .input.offset then " (lines \(.input.offset)-\(.input.offset + (.input.limit // 200)))" else "" end)"
-  elif .name == "Bash" then
-    ">>> $ \(.input.command[:150])"
-  elif .name == "Edit" then
-    ">>> Edit: \(.input.file_path)"
-  elif .name == "Write" then
-    ">>> Write: \(.input.file_path)"
-  elif .name == "Glob" then
-    ">>> Glob: \(.input.pattern)"
-  elif .name == "Grep" then
-    ">>> Grep: \(.input.pattern)\(if .input.path then " in \(.input.path)" else "" end)"
-  elif .name == "Task" then
-    ">>> Agent: \(.input.description // .input.prompt[:80])"
-  else
-    ">>> \(.name): \(.input.description // (.input | tostring)[:100])"
-  end;
-def format_content:
-  if type == "array" then
-    .[] | format_content
-  elif .type == "thinking" then
-    "[thinking] \(.thinking[:300])"
-  elif .type == "text" then
-    .text
-  elif .type == "tool_use" then
-    format_tool
-  else
-    empty
-  end;
-if .type == "assistant" then
-  .message.content | format_content
-elif .type == "user" and .tool_use_result then
-  if (.tool_use_result | type) == "string" then
-    "    \(.tool_use_result[:200])"
-  elif .tool_use_result.stdout then
-    "    \((.tool_use_result.stdout // "")[:200])"
-  else
-    empty
-  end
-elif .type == "result" then
-  "\n=== Done (cost: $\(.total_cost_usd // 0)) ==="
-else
-  empty
-end
-JQEOF
+    # Write prompt to a file and use a launcher script to avoid quoting issues
+    # across tmux -> script -> claude. 'script -f' allocates a PTY so output
+    # streams live to both the terminal (for --attach) and the log file.
+    PROMPT_FILE="${CLONE_DIR}/.claude-prompt"
+    printf '%s' "$PROMPT" > "$PROMPT_FILE"
+
+    LAUNCHER="${CLONE_DIR}/.claude-launcher.sh"
+    cat > "$LAUNCHER" <<'LAUNCHER_EOF'
+#!/bin/bash
+exec claude -p "$(cat .claude-prompt)" --dangerously-skip-permissions
+LAUNCHER_EOF
+    chmod +x "$LAUNCHER"
+
+    # Exclude working files from git so Claude doesn't accidentally commit them
+    printf '.claude-prompt\n.claude-launcher.sh\n' >> "${CLONE_DIR}/.git/info/exclude"
 
     tmux new-session -d -s "$SESSION_NAME" -c "$CLONE_DIR" \
-        "claude -p '${PROMPT}' --dangerously-skip-permissions --output-format stream-json --verbose 2>&1 | tee '${LOGFILE}.json' | jq -r --unbuffered -f '${JQ_FILTER_FILE}' | tee '${LOGFILE}'; echo '=== Claude finished at \$(date) ===' >> '${LOGFILE}'"
+        "script -q -f -c '${LAUNCHER}' '${LOGFILE}'; echo '=== Claude finished at \$(date) ===' >> '${LOGFILE}'"
 
-    echo "==> Claude is working autonomously on ${REPO_NAME}/${BRANCH}" >&2
-    echo "==> Watch live: ./run.sh --attach ${SESSION_NAME}" >&2
-    echo "==> Transcript: ${LOGFILE}" >&2
-    echo "==> Raw JSON: ${LOGFILE}.json" >&2
+    echo "==> Claude is working autonomously on ${REPO_NAME}/${WORK_BRANCH}" >&2
+    echo "==> Pull Claude's work: git pull claude ${WORK_BRANCH}" >&2
+    echo "==> Watch logs: docker exec -it ${CLAUDE_CONTAINER_NAME:-claude-docker} tail -f ${LOGFILE}" >&2
 done

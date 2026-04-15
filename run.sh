@@ -4,6 +4,7 @@
 # Usage:
 #   ./run.sh                        # Start default instance (port 2222)
 #   ./run.sh --build                # Rebuild and start
+#   ./run.sh -k ~/.ssh/my.pub       # Use a specific SSH public key
 #   ./run.sh -n worker2 -p 2223     # Start a named instance on a different port
 #   ./run.sh -n worker2 --stop      # Stop a specific instance
 #   ./run.sh -n worker2 --destroy   # Stop and delete all data (repos, work, logs)
@@ -15,6 +16,7 @@ set -euo pipefail
 # Parse instance name and port from flags
 INSTANCE="default"
 PORT="2222"
+SSH_KEY=""
 ACTION=""
 
 while [[ $# -gt 0 ]]; do
@@ -27,7 +29,11 @@ while [[ $# -gt 0 ]]; do
             PORT="$2"
             shift 2
             ;;
-        --build|--stop|--destroy|--logs|--status|--shell)
+        -k|--key)
+            SSH_KEY="$2"
+            shift 2
+            ;;
+        --build|--stop|--destroy|--logs|--status|--shell|--kill)
             ACTION="$1"
             shift
             ;;
@@ -46,6 +52,23 @@ done
 
 export CLAUDE_INSTANCE="$INSTANCE"
 export SSH_PORT="$PORT"
+
+# Resolve SSH public key path
+if [ -n "$SSH_KEY" ]; then
+    SSH_KEY="$(cd "$(dirname "$SSH_KEY")" && pwd)/$(basename "$SSH_KEY")"
+    if [ ! -f "$SSH_KEY" ]; then
+        echo "Error: SSH public key not found: $SSH_KEY" >&2
+        exit 1
+    fi
+    export SSH_PUBKEY="$SSH_KEY"
+elif [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
+    export SSH_PUBKEY="$HOME/.ssh/id_ed25519.pub"
+elif [ -f "$HOME/.ssh/id_rsa.pub" ]; then
+    export SSH_PUBKEY="$HOME/.ssh/id_rsa.pub"
+else
+    echo "Error: No SSH public key found. Provide one with -k <path>" >&2
+    exit 1
+fi
 CONTAINER_NAME="claude-${INSTANCE}"
 COMPOSE="docker compose -p claude-${INSTANCE}"
 
@@ -71,6 +94,10 @@ case "${ACTION:-start}" in
         else
             echo "Cancelled."
         fi
+        ;;
+    --kill)
+        echo "Killing all Claude sessions in [${INSTANCE}]..."
+        docker exec -u git "$CONTAINER_NAME" tmux kill-server 2>/dev/null && echo "Done." || echo "No sessions running."
         ;;
     --logs)
         $COMPOSE logs -f
@@ -104,7 +131,7 @@ case "${ACTION:-start}" in
         echo "Running Claude Docker instances:"
         docker ps --filter "name=claude-" --format "  {{.Names}}\t{{.Status}}\t{{.Ports}}"
         ;;
-    start|"")
+    start|""|--start)
         echo "Starting Claude Docker [${INSTANCE}] on port ${PORT}..."
         HOST_UID="$(id -u)" HOST_GID="$(id -g)" $COMPOSE up -d
         echo ""
@@ -120,5 +147,10 @@ case "${ACTION:-start}" in
         echo "  $0 -n ${INSTANCE} --stop       Stop the container"
         echo "  $0 -n ${INSTANCE} --destroy    Stop and wipe all data"
         echo "  $0 --list                      List all running instances"
+        ;;
+    *)
+        echo "Error: Unknown command '${ACTION}'" >&2
+        echo "Usage: $0 [--build|--stop|--destroy|--status|--attach|--logs|--shell|--list]" >&2
+        exit 1
         ;;
 esac
